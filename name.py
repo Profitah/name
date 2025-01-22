@@ -1,18 +1,18 @@
-import requests
+!!cleanimport requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 import os
 from pymongo import MongoClient
 
-# .env 파일 로드
 load_dotenv()
 
-# 환경 변수에서 LINK 값 가져오기
+# MongoDB에 연결
 link = os.getenv('LINK')
-
-# MongoDB 연결
-CLIENT = MongoClient()
-db = CLIENT['CLIENT']  
+client_host = os.getenv('CLIENT')
+client_port = int(os.getenv('PORT')) 
+db_name = os.getenv('DATABASE')
+client = MongoClient(client_host, client_port)
+db = client[db_name]
 
 # 웹브라우저의 User-Agent를 명시하고, 웹페이지 데이터를 서버에 요청해 메모리로 가져옴
 headers = {
@@ -21,18 +21,38 @@ headers = {
 response = requests.get(link, headers=headers)
 
 if response.status_code == 200:
-    # HTML에  BeautifulSoup을 사용해 텍스트를 파싱
+    # HTML에 BeautifulSoup을 사용해 텍스트를 파싱
     soup = BeautifulSoup(response.text, 'html.parser')
 
-    # select() 메서드로 범위 지정
-    songs = soup.select('div.wrap_song_info div.rank01 a')
-    singers = soup.select('div.wrap_song_info div.rank02 a')
+    # 곡 제목과 가수 정보가 포함된 부모 요소 추출
+    song_info = soup.select('div.wrap_song_info')
 
-    # 1위부터 순서대로 페이지에 있는 모든 제목과 가수 출력
-    for i in range(100):
-        song = songs[i].text.strip()
-        singer = singers[i].text.strip()
-        print(f'{i+1}위: {song} - {singer}')
+    # 데이터 저장 카운트 초기화 
+    save_count = 0
+
+    # 각 곡 정보 추출
+    for info in song_info:
+        # 곡 제목 추출 1번째 자식만.
+        song_select = info.select_one('div.rank01 a:nth-child(1)')
+        song = song_select.text.strip() if song_select else None
+
+        # 가수 정보 추출
+        singer_select = info.select('div.rank02 a')
+        singers = ",".join(sorted(set([singer.text.strip() for singer in singer_select]))) if singer_select else None
+
+        if song and singers:  
+
+            doc = {
+                'song': song,
+                'singer': singers
+            }
+
+            # MongoDB에 데이터 저장
+            db.songs.insert_one(doc)
+            save_count += 1
+
+    # 저장 완료 메시지 출력
+    print(f'{save_count}개의 곡이 저장되었습니다.')
 
 # 인터넷 오류 등의 이유로 요청 실패시 상태 코드 출력
 else:
